@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# env variables
+.env
+
+# Editor directories and files
+.DS_Store
+
+
+# Logs
+logs/
+*.log
