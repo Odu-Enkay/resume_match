@@ -21,12 +21,12 @@ function getMatchingKeywords(resumeKeywords, jobKeywords) {
   const resumeSet = new Set(resumeKeywords);
   const matched = jobKeywords.filter(word => resumeSet.has(word));
   const missing = jobKeywords.filter(word => !resumeSet.has(word));
-  const score = jobKeywords.length === 0 ? 0 : (matched.length / jobKeywords.length) * 100;
+  const score = jobKeywords.length === 0 ? 0 : (matched.length / jobKeywords.length) * 100 ;
 
   return {
     matched,
     missing,
-    score: score.toFixed(2)
+    score: score.toFixed(2) + '% match'
   };
 }
 
