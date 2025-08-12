@@ -1,25 +1,28 @@
-const fetch = require('node-fetch');
+require('dotenv').config(); // Load .env variables
+
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 const HF_API_KEY = process.env.HF_API_KEY;
 
-async function extractEntites(text){
+async function extractEntities(text) {
   const response = await fetch(
-    'https://api-inference.huggingface.co/models/dslim/bert-base-NER',{
-      method:'POST', 
-      Headers: {
+    'https://api-inference.huggingface.co/models/dslim/bert-base-NER',
+    {
+      method: 'POST',
+      headers: { // lowercase "headers"
         Authorization: `Bearer ${HF_API_KEY}`,
-        'Content-type': 'application/json',
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({ inputs: text }),
     }
   );
 
   if (!response.ok) {
-    throw new Error('NER API request failed');
+    throw new Error(`NER API request failed with status ${response.status}`);
   }
 
   const data = await response.json();
   return data;
-
 }
 
-module.exports = {extractEntites};
+module.exports = { extractEntities };
