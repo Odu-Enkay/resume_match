@@ -1,7 +1,9 @@
-const { parseResume } = require('../services/parserService');
-const { extractKeywords, getMatchingKeywords } = require('../utils/keywordUtils');
+const path = require('path');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const { extractEntities } = require('../services/nerService');
 
-exports.parseAndMatch = async (req, res) => {
+exports.parseAndExtract = async (req, res) => {
   const jobDescription = req.body.jobDescription;
   const resumeFile = req.file;
 
@@ -10,25 +12,49 @@ exports.parseAndMatch = async (req, res) => {
   }
 
   try {
-    // Parse the resume file to text
-    const resumeText = await parseResume(resumeFile);
+    let resumeText = '';
+    const ext = path.extname(resumeFile.originalname).toLowerCase();
+    if (ext === '.pdf') {
+      const data = await pdfParse(resumeFile.buffer);
+      resumeText = data.text;
+    } else if (ext === '.docx') {
+      const result = await mammoth.extractRawText({ buffer: resumeFile.buffer });
+      resumeText = result.value;
+    } else {
+      return res.status(400).json({ error: 'Unsupported file type. Only PDF and DOCX are allowed.' });
+    }
 
-    // Extract keywords from both resume and job description
-    const resumeKeywords = extractKeywords(resumeText);
-    const jobKeywords = extractKeywords(jobDescription);
+    const resumeEntities = await extractEntities(resumeText);
+    const jdEntities = await extractEntities(jobDescription);
 
-    // Calculate matching keywords and score
-    const matchResult = getMatchingKeywords(resumeKeywords, jobKeywords);
+    const filterEntities = (entities, types) =>
+      entities.filter(e => types.includes(e.entity_group)).map(e => e.word);
+
+    const resumeSkills = filterEntities(resumeEntities, ['MISC']);
+    const resumePersons = filterEntities(resumeEntities, ['PER']);
+    const resumeOrgs = filterEntities(resumeEntities, ['ORG']);
+
+    const jdSkills = filterEntities(jdEntities, ['MISC']);
+    const jdPersons = filterEntities(jdEntities, ['PER']);
+    const jdOrgs = filterEntities(jdEntities, ['ORG']);
 
     res.json({
-      message: "Resume parsed successfully!",
+      message: 'Parsed and extracted entities successfully!',
       fileName: resumeFile.originalname,
-      content: resumeText,
-      resumeLength: resumeText.length,
-      jobDescriptionContent: jobDescription.substring(0, 100),
-      matchResult,   // Return the matching info
+      resumeTextLength: resumeText.length,
+      resumeEntities: {
+        skills: resumeSkills,
+        persons: resumePersons,
+        organizations: resumeOrgs,
+      },
+      jobDescriptionEntities: {
+        skills: jdSkills,
+        persons: jdPersons,
+        organizations: jdOrgs,
+      },
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to parse resume.' });
+    console.error(error);
+    res.status(500).json({ error: 'Failed to parse resume or extract entities.' });
   }
 };
