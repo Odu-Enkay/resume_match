@@ -3,6 +3,7 @@ const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const { extractEntities } = require('../services/nerService');
 const { splitSections } = require('../utils/sectionSplitter');
+const { semanticSimilarity} = require('../services/matchService');
 
 // Utility to normalize and deduplicate
 function cleanAndUnique(arr) {
@@ -65,6 +66,11 @@ exports.parseAndExtract = async (req, res) => {
     // ----- STEP 4: Calculate skill match score -----
     const matchResult = calculateMatchScore(resumeSkills, jdSkills);
 
+
+    // ----- STEP 4b: Calculate semantic similarity -----
+    const semanticScoreRaw = await semanticSimilarity(resumeText, jobDescription);
+    const semanticScore = Math.round(semanticScoreRaw * 100); // convert to percentage
+
     // ----- STEP 5: Optional section-level NER -----
     const resumeSkillsEntities = await extractEntities(resumeSections.Skills || '');
     const resumeExperienceEntities = await extractEntities(resumeSections.Experience || '');
@@ -91,7 +97,9 @@ exports.parseAndExtract = async (req, res) => {
       },
       match: {
         score: matchResult.score,
-        matchedSkills: matchResult.matchedSkills
+        matchedSkills: matchResult.matchedSkills,
+        semanticScore: semanticScore,
+        overallScore: Math.round((matchResult.score + semanticScore)/2)
       }
     });
   } catch (error) {
