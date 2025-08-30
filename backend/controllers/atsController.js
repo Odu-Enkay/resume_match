@@ -1,109 +1,87 @@
-const path = require('path');
+const { semanticSimilarity } = require('../services/matchService');
 const pdfParse = require('pdf-parse');
-const mammoth = require('mammoth');
-const { extractEntities } = require('../services/nerService');
-const { splitSections } = require('../utils/sectionSplitter');
-const { semanticSimilarity} = require('../services/matchService');
 
-// Utility to normalize and deduplicate
-function cleanAndUnique(arr) {
-  return [...new Set(arr.map(item => item.trim().toLowerCase()))].filter(Boolean);
+
+function extractKeywords(resumeText, jobDescription) {
+  const jobWords = jobDescription.toLowerCase().split(/\W+/);
+  const resumeWords = resumeText.toLowerCase().split(/\W+/);
+
+  const matched = [];
+  const missing = [];
+
+  jobWords.forEach(word => {
+    if (word.length > 2) { 
+      if (resumeWords.includes(word)) {
+        matched.push(word);
+      } else {
+        missing.push(word);
+      }
+    }
+  });
+
+  return { matched, missing };
 }
 
-// Utility to calculate skill overlap percentage
-function calculateMatchScore(resumeSkills, jdSkills) {
-  const resumeSet = new Set(resumeSkills);
-  const jdSet = new Set(jdSkills);
-  const overlap = [...resumeSet].filter(skill => jdSet.has(skill));
-  const score = jdSkills.length ? (overlap.length / jdSkills.length) * 100 : 0;
-  return {
-    score: Math.round(score),
-    matchedSkills: overlap
-  };
-}
-
-exports.parseAndExtract = async (req, res) => {
-  const jobDescription = req.body.jobDescription;
-  const resumeFile = req.file;
-
-  if (!resumeFile || !jobDescription) {
-    return res.status(400).json({ error: 'Resume file and job description are required.' });
-  }
-
+async function parseAndExtract(req, res) {
   try {
-    // ----- STEP 1: Extract raw text from resume -----
-    let resumeText = '';
-    const ext = path.extname(resumeFile.originalname).toLowerCase();
-
-    if (ext === '.pdf') {
-      const data = await pdfParse(resumeFile.buffer);
-      resumeText = data.text;
-    } else if (ext === '.docx') {
-      const result = await mammoth.extractRawText({ buffer: resumeFile.buffer });
-      resumeText = result.value;
-    } else {
-      return res.status(400).json({ error: 'Unsupported file type. Only PDF and DOCX are allowed.' });
+    // ====== Step1. Validation ======
+    if (!req.file) {
+      return res.status(400).json({ error: "Resume file is required" });
+    }
+    if (!req.body.jobDescription) {
+      return res.status(400).json({ error: "Job description text is required" });
     }
 
-    // ----- STEP 2: Rule-based section splitting -----
-    const resumeSections = splitSections(resumeText);
+    const resumeBuffer = req.file.buffer;
+    const jobDescription = req.body.jobDescription;
 
-    // ----- STEP 3: NER extraction -----
-    const resumeEntities = await extractEntities(resumeText);
-    const jdEntities = await extractEntities(jobDescription);
+    // ====== Step2. Extract Resume Text ======
+    const resumeData = await pdfParse(resumeBuffer);
+    const resumeText = resumeData.text;
 
-    const filterEntities = (entities, types) =>
-      entities.filter(e => types.includes(e.entity_group)).map(e => e.word);
+    // ====== Step3. Semantic Similarity ======
+    const similarity = await semanticSimilarity(resumeText, jobDescription);
 
-    // Raw extraction
-    const resumeSkillsRaw = filterEntities(resumeEntities, ['MISC']);
-    const jdSkillsRaw = filterEntities(jdEntities, ['MISC']);
+    // ====== Step4. Keyword Extraction  ======
+    const { matched, missing } = extractKeywords(resumeText, jobDescription);
 
-    // Clean + deduplicate
-    const resumeSkills = cleanAndUnique(resumeSkillsRaw);
-    const jdSkills = cleanAndUnique(jdSkillsRaw);
+    // ====== Step5. Years of Experience  ======
+    const yearsExperience = 3;
 
-    // ----- STEP 4: Calculate skill match score -----
-    const matchResult = calculateMatchScore(resumeSkills, jdSkills);
+    // ====== Step6. Compute Fit Score  ======
+    const keywordOverlap = matched.length / (matched.length + missing.length || 1);
+    const fitScore = (0.6 * similarity) + (0.3 * keywordOverlap) + (0.1 * (yearsExperience / 10));
 
+    // ====== Step7. Insights ======
+    const insights = [];
+    if (fitScore > 0.8) {
+      insights.push("Excellent alignment! Your resume is a strong match.");
+    } else if (fitScore > 0.6) {
+      insights.push("Good fit, but you can improve your chances by refining your keywords.");
+    } else {
+      insights.push("Weak fit. Consider tailoring your resume to highlight relevant skills and achievements.");
+    }
 
-    // ----- STEP 4b: Calculate semantic similarity -----
-    const semanticScoreRaw = await semanticSimilarity(resumeText, jobDescription);
-    const semanticScore = Math.round(semanticScoreRaw * 100); // convert to percentage
+    if (missing.length > 0) {
+      insights.push(`Add these missing skills/keywords: ${missing.slice(0, 10).join(', ')}...`);
+    }
 
-    // ----- STEP 5: Optional section-level NER -----
-    const resumeSkillsEntities = await extractEntities(resumeSections.Skills || '');
-    const resumeExperienceEntities = await extractEntities(resumeSections.Experience || '');
-    const resumeEducationEntities = await extractEntities(resumeSections.Education || '');
-    const resumeProfileEntities = await extractEntities(resumeSections.Profile || '');
+    if (similarity < 0.5) {
+      insights.push("Your resume and job description have low textual similarity. Try reframing your work experience using the job’s wording.");
+    }
 
-    // ----- STEP 6: Respond -----
+    // ====== Step8. Response ======
     res.json({
-      message: 'Parsed and extracted successfully!',
-      fileName: resumeFile.originalname,
-      resumeTextLength: resumeText.length,
-      sections: resumeSections,
-      entities: {
-        resume: {
-          skills: resumeSkills,
-          skillsSectionEntities: resumeSkillsEntities,
-          experienceSectionEntities: resumeExperienceEntities,
-          educationSectionEntities: resumeEducationEntities,
-          profileSectionEntities: resumeProfileEntities
-        },
-        jobDescription: {
-          skills: jdSkills
-        }
-      },
-      match: {
-        score: matchResult.score,
-        matchedSkills: matchResult.matchedSkills,
-        semanticScore: semanticScore,
-        overallScore: Math.round((matchResult.score + semanticScore)/2)
-      }
+      fitScore: (fitScore * 100).toFixed(2) + "%",
+      matchedKeywords: matched.slice(0, 15), 
+      missingKeywords: missing.slice(0, 15),
+      insights
     });
+
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to parse resume or extract entities.' });
+    res.status(500).json({ error: "Error parsing resume and job description" });
   }
-};
+}
+
+module.exports = { parseAndExtract };

@@ -1,5 +1,4 @@
-require('dotenv').config(); // Load .env variables
-
+require('dotenv').config(); 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const HF_API_KEY = process.env.HF_API_KEY;
@@ -9,7 +8,7 @@ async function extractEntities(text) {
     'https://api-inference.huggingface.co/models/dslim/bert-base-NER',
     {
       method: 'POST',
-      headers: { // lowercase "headers"
+      headers: { 
         Authorization: `Bearer ${HF_API_KEY}`,
         'Content-Type': 'application/json',
       },
