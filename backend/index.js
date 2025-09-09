@@ -10,7 +10,7 @@ require('dotenv').config();
 //
 app.use(cors());
 app.use(express.json());
-app.use('/', atsRoutes);
+app.use('/api', atsRoutes);
 
 //PORT
 const port = 3000;
